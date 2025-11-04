@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Generate Commands - DeepSeek Security Suite{% endblock %}
+{% block content %}
+<h1 class="mb-4">Generate Commands</h1>
+<form method="post" action="/">
+    <div class="mb-3">
+        <label for="target" class="form-label">Target:</label>
+        <input type="text" class="form-control" id="target" name="target">
+    </div>
+    <button type="submit" class="btn btn-primary">Generate Commands</button>
+</form>
+
+{% if commands %}
+    <h2 class="mt-4">Generated Commands:</h2>
+    <pre class="bg-light p-3 rounded" id="command-output">{{ commands }}</pre>
+{% endif %}
+{% endblock %}

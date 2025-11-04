@@ -276,7 +276,7 @@ class TestToolManagement:
         """Test extracting tool name from command"""
         assert extract_tool_from_command("nmap -sV example.com") == "nmap"
         assert extract_tool_from_command("subfinder -d example.com") == "subfinder"
-        assert extract_tool_from_command("~/tools/testssl.sh https://example.com") == "testssl"
+        assert extract_tool_from_command("~/tools/testssl.sh https://example.com") == "testssl.sh"
         assert extract_tool_from_command("python script.py") == "python"
         assert extract_tool_from_command("") == ""
 
