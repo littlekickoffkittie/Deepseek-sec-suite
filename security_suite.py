@@ -451,7 +451,7 @@ def run_generated_commands(command_string: str, session_manager: Optional[Sessio
                 print(f"  {Colors.YELLOW}... and {len(unavailable_cmds) - 5} more{Colors.ENDC}")
             print(f"\n{Colors.CYAN}💡 Tip: Run './setup-security-tools.sh' to install missing tools{Colors.ENDC}")
 
-        commands = available_cmds if available_cmds else commands
+        commands = available_cmds
 
     print(f"\n{Colors.GREEN}╔{'═' * 60}╗")
     print(f"║{Colors.BOLD}{'GENERATED COMMANDS'.center(60)}{Colors.ENDC}{Colors.GREEN}║")
