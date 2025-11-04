@@ -21,6 +21,14 @@ from session_manager import SessionManager
 from output_parser import OutputParser
 from report_generator import ReportGenerator
 
+# A single, authoritative list of all tools supported by the suite.
+ALL_TOOLS = [
+    'nmap', 'subfinder', 'httpx', 'nuclei', 'ffuf', 'gobuster',
+    'amass', 'waybackurls', 'sqlmap', 'whatweb', 'nikto', 'dirb',
+    'wpscan', 'arjun', 'xsstrike', 'commix', 'wfuzz', 'curl',
+    'testssl.sh', 'sslscan'
+]
+
 # --- Color Definitions ---
 class Colors:
     """ANSI color codes for terminal output"""
@@ -443,13 +451,7 @@ def install_tool(tool_name: str) -> bool:
 
 def get_available_tools() -> Set[str]:
     """Get a set of all available security tools."""
-    common_tools = [
-        'nmap', 'subfinder', 'httpx', 'nuclei', 'ffuf', 'gobuster',
-        'amass', 'waybackurls', 'sqlmap', 'whatweb', 'nikto', 'dirb',
-        'wpscan', 'arjun', 'xsstrike', 'commix', 'wfuzz', 'curl',
-        'testssl.sh', 'sslscan'
-    ]
-    return {tool for tool in common_tools if check_tool_available(tool)}
+    return {tool for tool in ALL_TOOLS if check_tool_available(tool)}
 
 def extract_tool_from_command(command: str) -> str:
     """Extract the tool name from a command string."""
@@ -461,8 +463,9 @@ def extract_tool_from_command(command: str) -> str:
     # Handle paths like ~/tools/testssl.sh/testssl.sh
     if '/' in tool:
         tool = tool.split('/')[-1]
-    # Remove file extensions
-    tool = tool.replace('.sh', '').replace('.py', '')
+    # If the tool is 'testssl.sh', keep the extension. Otherwise, remove it.
+    if tool != 'testssl.sh':
+        tool = tool.replace('.sh', '').replace('.py', '')
     return tool
 
 def filter_commands_by_availability(commands: str, available_tools: Set[str]) -> tuple[List[str], List[str]]:
@@ -665,13 +668,6 @@ def show_tool_status():
     print(f"{'═' * 60}{Colors.ENDC}\n")
 
     available_tools = get_available_tools()
-
-    all_tools = [
-        'nmap', 'subfinder', 'httpx', 'nuclei', 'ffuf', 'gobuster',
-        'amass', 'waybackurls', 'sqlmap', 'whatweb', 'nikto', 'dirb',
-        'wpscan', 'arjun', 'xsstrike', 'commix', 'wfuzz', 'curl',
-        'testssl.sh', 'sslscan'
-    ]
 
     print(f"{Colors.GREEN}✓ Available Tools ({len(available_tools)}):{Colors.ENDC}")
     cols = 3

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Tool Status - DeepSeek Security Suite{% endblock %}
+{% block content %}
+<h1 class="mb-4">Tool Status</h1>
+<div class="row">
+    <div class="col-md-6">
+        <h2>Available Tools</h2>
+        <ul class="list-group">
+            {% for tool in available_tools %}
+                <li class="list-group-item list-group-item-success">{{ tool }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    <div class="col-md-6">
+        <h2>Missing Tools</h2>
+        <ul class="list-group">
+            {% for tool in missing_tools %}
+                <li class="list-group-item list-group-item-danger">{{ tool }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+{% endblock %}
