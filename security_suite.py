@@ -16,6 +16,16 @@ try:
 except ImportError:
     HACKERONE_AVAILABLE = False
 
+# Local imports for new features
+try:
+    from session_manager import SessionManager
+    from output_parser import OutputParser
+    from report_generator import ReportGenerator
+    FEATURES_AVAILABLE = True
+except ImportError as e:
+    FEATURES_AVAILABLE = False
+    print(f"Feature import error: {e}")
+
 # --- Color Definitions ---
 class Colors:
     """ANSI color codes for terminal output"""
@@ -399,18 +409,24 @@ def get_multiline_input(prompt: str) -> str:
             break
     return "\n".join(lines)
 
-def run_generated_commands(command_string: str, check_availability: bool = True, default_timeout: int = 120):
+def run_generated_commands(command_string: str, session_manager: Optional[SessionManager] = None, output_parser: Optional[OutputParser] = None, check_availability: bool = True, default_timeout: int = 120):
     """
     Parses a string of commands (one per line) and asks the user to
-    confirm execution for each.
+    confirm execution for each, logging and parsing results.
 
     Args:
         command_string: Commands to execute (one per line)
+        session_manager: The session manager instance
+        output_parser: The output parser instance
         check_availability: Whether to check if tools are available
         default_timeout: Default timeout in seconds for command execution
     """
     if not command_string.strip():
         print("[Info] No commands were generated.")
+        return
+
+    if session_manager and not session_manager.current_session:
+        print(f"{Colors.RED}[!] No active session. Create or load a session first using the 'session' menu.{Colors.ENDC}")
         return
 
     print("\n--- Generated Commands ---")
@@ -503,6 +519,26 @@ def run_generated_commands(command_string: str, check_availability: bool = True,
                 status_color = Colors.GREEN if result.returncode == 0 else Colors.RED
                 print(f"\n{status_color}[Exit Code: {result.returncode}]{Colors.ENDC}")
 
+                # Log to session manager
+                if session_manager:
+                    full_output = f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
+                    session_manager.add_command(cmd, full_output, result.returncode)
+
+                # Parse output and add to session
+                if output_parser and result.stdout:
+                    tool_name = extract_tool_from_command(cmd)
+                    try:
+                        parsed_data = output_parser.parse(result.stdout, tool=tool_name)
+                        if parsed_data:
+                            print(f"{Colors.GREEN}[✓] Parsed '{tool_name}' output successfully.{Colors.ENDC}")
+                            if session_manager:
+                                session_manager.add_tool_output(tool_name, parsed_data)
+                        else:
+                            print(f"{Colors.YELLOW}[!] No specific parser for '{tool_name}', output stored as raw text.{Colors.ENDC}")
+                    except Exception as e:
+                        print(f"{Colors.RED}[✗] Error parsing output for {tool_name}: {e}{Colors.ENDC}")
+
+
             except FileNotFoundError as e:
                 tool = extract_tool_from_command(cmd)
                 print(f"\n{Colors.RED}[✗] Command not found: {tool}{Colors.ENDC}")
@@ -555,12 +591,227 @@ def show_tool_status():
 
     print(f"\n{Colors.CYAN}{'═' * 60}{Colors.ENDC}\n")
 
+def session_management_menu(session_manager: SessionManager):
+    """Display and handle the session management menu."""
+    if not session_manager:
+        print(f"{Colors.RED}[!] Session Manager is not available.{Colors.ENDC}")
+        return
+
+    while True:
+        print(f"\n{Colors.CYAN}╔{'═' * 58}╗")
+        print(f"║{Colors.BOLD}{'SESSION MANAGEMENT'.center(58)}{Colors.ENDC}{Colors.CYAN}║")
+        print(f"╠{'═' * 58}╣")
+        print(f"║  {Colors.GREEN}[1]{Colors.ENDC} Create New Session".ljust(67) + "║")
+        print(f"║  {Colors.GREEN}[2]{Colors.ENDC} Load Session".ljust(67) + "║")
+        print(f"║  {Colors.GREEN}[3]{Colors.ENDC} List Sessions".ljust(67) + "║")
+        print(f"║  {Colors.GREEN}[4]{Colors.ENDC} Delete Session".ljust(67) + "║")
+        print(f"║  {Colors.GREEN}[5]{Colors.ENDC} Show Session Summary".ljust(67) + "║")
+        print(f"║  {Colors.RED}[b]{Colors.ENDC} Back to Main Menu".ljust(67) + "║")
+        print(f"╚{'═' * 58}╝{Colors.ENDC}\n")
+
+        choice = input(f"{Colors.CYAN}[{Colors.GREEN}Session{Colors.CYAN}] ▶{Colors.ENDC} ").strip().lower()
+
+        if choice == 'b':
+            break
+
+        elif choice == '1':
+            target = input("Enter target (e.g., example.com): ").strip()
+            program = input("Enter program name (optional): ").strip()
+            if target:
+                session_manager.create_session(target, program)
+                print(f"{Colors.GREEN}[✓] New session created for target: {target}{Colors.ENDC}")
+            else:
+                print(f"{Colors.RED}[!] Target is required.{Colors.ENDC}")
+
+        elif choice == '2':
+            sessions = session_manager.list_sessions()
+            if not sessions:
+                print(f"{Colors.YELLOW}[!] No sessions found.{Colors.ENDC}")
+                continue
+
+            for idx, s in enumerate(sessions, 1):
+                print(f"  {idx}. {s['filename']} ({s['target']})")
+
+            try:
+                sel = int(input("Select session to load: ").strip())
+                if 1 <= sel <= len(sessions):
+                    session_manager.load_session(sessions[sel - 1]['filename'])
+                    print(f"{Colors.GREEN}[✓] Session '{sessions[sel - 1]['filename']}' loaded.{Colors.ENDC}")
+                else:
+                    print(f"{Colors.RED}[!] Invalid selection.{Colors.ENDC}")
+            except ValueError:
+                print(f"{Colors.RED}[!] Invalid input.{Colors.ENDC}")
+
+        elif choice == '3':
+            sessions = session_manager.list_sessions()
+            if not sessions:
+                print(f"{Colors.YELLOW}[!] No sessions found.{Colors.ENDC}")
+            else:
+                print(f"\n{Colors.BOLD}Saved Sessions:{Colors.ENDC}")
+                for s in sessions:
+                    print(f"  - {s['filename']} (Target: {s['target']}, Findings: {s['findings_count']})")
+
+        elif choice == '4':
+            sessions = session_manager.list_sessions()
+            if not sessions:
+                print(f"{Colors.YELLOW}[!] No sessions found.{Colors.ENDC}")
+                continue
+
+            for idx, s in enumerate(sessions, 1):
+                print(f"  {idx}. {s['filename']}")
+
+            try:
+                sel = int(input("Select session to delete: ").strip())
+                if 1 <= sel <= len(sessions):
+                    filename = sessions[sel - 1]['filename']
+                    confirm = input(f"Are you sure you want to delete '{filename}'? (y/N): ").strip().lower()
+                    if confirm == 'y':
+                        if session_manager.delete_session(filename):
+                            print(f"{Colors.GREEN}[✓] Session '{filename}' deleted.{Colors.ENDC}")
+                        else:
+                            print(f"{Colors.RED}[!] Failed to delete session.{Colors.ENDC}")
+                else:
+                    print(f"{Colors.RED}[!] Invalid selection.{Colors.ENDC}")
+            except ValueError:
+                print(f"{Colors.RED}[!] Invalid input.{Colors.ENDC}")
+
+        elif choice == '5':
+            if session_manager.current_session:
+                summary = session_manager.get_session_summary()
+                print("\n--- Session Summary ---")
+                for key, value in summary.items():
+                    print(f"  {key.replace('_', ' ').title()}: {value}")
+                print("-----------------------\n")
+            else:
+                print(f"{Colors.YELLOW}[!] No active session.{Colors.ENDC}")
+
+        else:
+            print(f"{Colors.RED}[!] Unknown command.{Colors.ENDC}")
+
+def print_main_menu():
+    """Prints the main menu options."""
+    print(f"\n{Colors.CYAN}╔{'═' * 58}╗")
+    print(f"║{Colors.BOLD}{'MAIN MENU'.center(58)}{Colors.ENDC}{Colors.CYAN}║")
+    print(f"╠{'═' * 58}╣")
+    if HACKERONE_AVAILABLE:
+        print(f"║  {Colors.GREEN}[0]{Colors.ENDC} Fetch Program from HackerOne {Colors.YELLOW}(auto-analyze){Colors.CYAN}".ljust(75) + "║")
+    print(f"║  {Colors.GREEN}[1]{Colors.ENDC} Analyze Bounty {Colors.YELLOW}(provides context){Colors.CYAN}".ljust(75) + "║")
+    print(f"║  {Colors.GREEN}[2]{Colors.ENDC} Generate Commands {Colors.YELLOW}(uses context){Colors.CYAN}".ljust(75) + "║")
+    print(f"║  {Colors.GREEN}[3]{Colors.ENDC} Run Commands for Target {Colors.YELLOW}(clears context){Colors.CYAN}".ljust(75) + "║")
+    print(f"║  {Colors.GREEN}[4]{Colors.ENDC} Stream Free-form Chat".ljust(67) + "║")
+    print(f"║  {Colors.GREEN}[5]{Colors.ENDC} Clear Conversation History".ljust(67) + "║")
+    print(f"║  {Colors.GREEN}[6]{Colors.ENDC} Show Tool Status".ljust(67) + "║")
+    if FEATURES_AVAILABLE:
+        print(f"║  {Colors.GREEN}[7]{Colors.ENDC} Session Management".ljust(67) + "║")
+        print(f"║  {Colors.GREEN}[8]{Colors.ENDC} Generate Report".ljust(67) + "║")
+    print(f"║  {Colors.RED}[q]{Colors.ENDC} Quit".ljust(67) + "║")
+    print(f"╚{'═' * 58}╝{Colors.ENDC}\n")
+
+def handle_hackerone_fetch(suite: DeepSeekSecuritySuite):
+    """Handles the logic for fetching and analyzing a HackerOne program."""
+    if not HACKERONE_AVAILABLE:
+        print(f"{Colors.RED}[!] HackerOne API not available. Make sure hackerone_api.py is in the same directory.{Colors.ENDC}")
+        return
+
+    h1_username = os.getenv("HACKERONE_USERNAME")
+    h1_token = os.getenv("HACKERONE_API_TOKEN")
+
+    if not h1_username or not h1_token:
+        print(f"{Colors.RED}[!] HackerOne credentials not found{Colors.ENDC}")
+        print(f"\n{Colors.YELLOW}Setup instructions:{Colors.ENDC}")
+        print(f"1. Get API credentials: {Colors.CYAN}https://hackerone.com/settings/api_token/edit{Colors.ENDC}")
+        print(f"2. Add to .env file:")
+        print(f"   {Colors.GREEN}HACKERONE_USERNAME=your_username{Colors.ENDC}")
+        print(f"   {Colors.GREEN}HACKERONE_API_TOKEN=your_token{Colors.ENDC}")
+        return
+
+    try:
+        h1_client = HackerOneAPI(h1_username, h1_token)
+
+        print(f"\n{Colors.CYAN}╔{'═' * 58}╗")
+        print(f"║{Colors.BOLD}{'HACKERONE PROGRAM FETCH'.center(58)}{Colors.ENDC}{Colors.CYAN}║")
+        print(f"╚{'═' * 58}╝{Colors.ENDC}\n")
+
+        search_choice = input(f"{Colors.CYAN}[1] Search programs [2] Enter handle directly: {Colors.ENDC}").strip()
+
+        program_handle = None
+        if search_choice == '1':
+            query = input(f"{Colors.CYAN}Search query: {Colors.ENDC}").strip()
+            if query:
+                print(f"{Colors.YELLOW}[*] Searching programs...{Colors.ENDC}")
+                matches = h1_client.search_programs(query)
+
+                if not matches:
+                    print(f"{Colors.RED}[!] No programs found{Colors.ENDC}")
+                    return
+
+                print(f"\n{Colors.GREEN}[✓] Found {len(matches)} programs:{Colors.ENDC}\n")
+                for idx, prog in enumerate(matches[:10], 1):
+                    attrs = prog.get("attributes", {})
+                    handle = attrs.get("handle", "N/A")
+                    name = attrs.get("name", "N/A")
+                    bounty = "💰" if attrs.get("offers_bounties", False) else "🏆"
+                    print(f"  {idx}. {bounty} {Colors.GREEN}{handle}{Colors.ENDC} - {name}")
+
+                idx_choice = input(f"\n{Colors.CYAN}Select program (1-{min(len(matches), 10)}): {Colors.ENDC}").strip()
+                try:
+                    idx = int(idx_choice) - 1
+                    if 0 <= idx < len(matches):
+                        program_handle = matches[idx].get("attributes", {}).get("handle")
+                except ValueError:
+                    print(f"{Colors.RED}[!] Invalid selection{Colors.ENDC}")
+                    return
+        else:
+            program_handle = input(f"{Colors.CYAN}Program handle (e.g., 'security'): {Colors.ENDC}").strip()
+
+        if not program_handle:
+            print(f"{Colors.RED}[!] No program selected{Colors.ENDC}")
+            return
+
+        print(f"\n{Colors.YELLOW}[*] Fetching program details for '{program_handle}'...{Colors.ENDC}")
+        program = h1_client.get_program(program_handle)
+        print(h1_client.format_program_details(program))
+
+        analyze = input(f"\n{Colors.CYAN}Analyze this program with AI? [Y/n]: {Colors.ENDC}").strip().lower()
+        if analyze != 'n':
+            print(f"\n{Colors.YELLOW}[*] Preparing program data for AI analysis...{Colors.ENDC}")
+            bounty_text = h1_client.export_program_for_analysis(program)
+
+            print(f"{Colors.YELLOW}[*] Analyzing with DeepSeek AI...{Colors.ENDC}")
+            analysis = suite.analyze_bounty(bounty_text)
+
+            print(f"\n{Colors.GREEN}╔{'═' * 58}╗")
+            print(f"║{Colors.BOLD}{'AI ANALYSIS RESULTS'.center(58)}{Colors.ENDC}{Colors.GREEN}║")
+            print(f"╚{'═' * 58}╝{Colors.ENDC}")
+            print(analysis)
+            print(f"{Colors.GREEN}{'─' * 60}{Colors.ENDC}\n")
+
+    except Exception as e:
+        print(f"{Colors.RED}[✗] Error: {e}{Colors.ENDC}")
+
 def main_interactive_loop(suite: DeepSeekSecuritySuite):
     """Runs the main interactive REPL for the security suite."""
+    if FEATURES_AVAILABLE:
+        session_manager = SessionManager()
+        output_parser = OutputParser()
+        report_generator = ReportGenerator()
+    else:
+        session_manager, output_parser, report_generator = None, None, None
+
     print_banner()
     print(f"{Colors.YELLOW}Type {Colors.CYAN}'menu'{Colors.YELLOW} for options or {Colors.RED}'quit'{Colors.YELLOW} to exit.{Colors.ENDC}\n")
 
+    # Session status line
+    def print_session_status():
+        if session_manager and session_manager.current_session:
+            target = session_manager.current_session['target']
+            findings_count = len(session_manager.current_session['findings'])
+            print(f"{Colors.MAGENTA}Active Session: {Colors.BOLD}{target}{Colors.ENDC}{Colors.MAGENTA} | Findings: {findings_count}{Colors.ENDC}")
+        else:
+            print(f"{Colors.YELLOW}No active session. Use 'session' menu to start.{Colors.ENDC}")
+
     while True:
+        print_session_status()
         try:
             choice = input(f"{Colors.CYAN}[{Colors.GREEN}Main{Colors.CYAN}] ▶{Colors.ENDC} ").strip().lower()
 
@@ -569,111 +820,20 @@ def main_interactive_loop(suite: DeepSeekSecuritySuite):
                 break
 
             elif choice in ['m', 'menu', 'h', 'help']:
-                print(f"\n{Colors.CYAN}╔{'═' * 58}╗")
-                print(f"║{Colors.BOLD}{'MAIN MENU'.center(58)}{Colors.ENDC}{Colors.CYAN}║")
-                print(f"╠{'═' * 58}╣")
-                if HACKERONE_AVAILABLE:
-                    print(f"║  {Colors.GREEN}[0]{Colors.ENDC} Fetch Program from HackerOne {Colors.YELLOW}(auto-analyze){Colors.CYAN}".ljust(75) + "║")
-                print(f"║  {Colors.GREEN}[1]{Colors.ENDC} Analyze Bounty {Colors.YELLOW}(provides context){Colors.CYAN}".ljust(75) + "║")
-                print(f"║  {Colors.GREEN}[2]{Colors.ENDC} Generate Commands {Colors.YELLOW}(uses context){Colors.CYAN}".ljust(75) + "║")
-                print(f"║  {Colors.GREEN}[3]{Colors.ENDC} Run Commands for Target {Colors.YELLOW}(clears context){Colors.CYAN}".ljust(75) + "║")
-                print(f"║  {Colors.GREEN}[4]{Colors.ENDC} Stream Free-form Chat".ljust(67) + "║")
-                print(f"║  {Colors.GREEN}[5]{Colors.ENDC} Clear Conversation History".ljust(67) + "║")
-                print(f"║  {Colors.GREEN}[6]{Colors.ENDC} Show Tool Status".ljust(67) + "║")
-                print(f"║  {Colors.RED}[q]{Colors.ENDC} Quit".ljust(67) + "║")
-                print(f"╚{'═' * 58}╝{Colors.ENDC}\n")
+                print_main_menu()
                 continue
 
             elif choice == '0':
-                # Fetch from HackerOne
-                if not HACKERONE_AVAILABLE:
-                    print(f"{Colors.RED}[!] HackerOne API not available. Make sure hackerone_api.py is in the same directory.{Colors.ENDC}")
-                    continue
-
-                h1_username = os.getenv("HACKERONE_USERNAME")
-                h1_token = os.getenv("HACKERONE_API_TOKEN")
-
-                if not h1_username or not h1_token:
-                    print(f"{Colors.RED}[!] HackerOne credentials not found{Colors.ENDC}")
-                    print(f"\n{Colors.YELLOW}Setup instructions:{Colors.ENDC}")
-                    print(f"1. Get API credentials: {Colors.CYAN}https://hackerone.com/settings/api_token/edit{Colors.ENDC}")
-                    print(f"2. Add to .env file:")
-                    print(f"   {Colors.GREEN}HACKERONE_USERNAME=your_username{Colors.ENDC}")
-                    print(f"   {Colors.GREEN}HACKERONE_API_TOKEN=your_token{Colors.ENDC}")
-                    continue
-
-                try:
-                    h1_client = HackerOneAPI(h1_username, h1_token)
-
-                    # Ask user to search or provide handle
-                    print(f"\n{Colors.CYAN}╔{'═' * 58}╗")
-                    print(f"║{Colors.BOLD}{'HACKERONE PROGRAM FETCH'.center(58)}{Colors.ENDC}{Colors.CYAN}║")
-                    print(f"╚{'═' * 58}╝{Colors.ENDC}\n")
-
-                    search_choice = input(f"{Colors.CYAN}[1] Search programs [2] Enter handle directly: {Colors.ENDC}").strip()
-
-                    program_handle = None
-                    if search_choice == '1':
-                        query = input(f"{Colors.CYAN}Search query: {Colors.ENDC}").strip()
-                        if query:
-                            print(f"{Colors.YELLOW}[*] Searching programs...{Colors.ENDC}")
-                            matches = h1_client.search_programs(query)
-
-                            if not matches:
-                                print(f"{Colors.RED}[!] No programs found{Colors.ENDC}")
-                                continue
-
-                            print(f"\n{Colors.GREEN}[✓] Found {len(matches)} programs:{Colors.ENDC}\n")
-                            for idx, prog in enumerate(matches[:10], 1):
-                                attrs = prog.get("attributes", {})
-                                handle = attrs.get("handle", "N/A")
-                                name = attrs.get("name", "N/A")
-                                bounty = "💰" if attrs.get("offers_bounties", False) else "🏆"
-                                print(f"  {idx}. {bounty} {Colors.GREEN}{handle}{Colors.ENDC} - {name}")
-
-                            idx_choice = input(f"\n{Colors.CYAN}Select program (1-{min(len(matches), 10)}): {Colors.ENDC}").strip()
-                            try:
-                                idx = int(idx_choice) - 1
-                                if 0 <= idx < len(matches):
-                                    program_handle = matches[idx].get("attributes", {}).get("handle")
-                            except ValueError:
-                                print(f"{Colors.RED}[!] Invalid selection{Colors.ENDC}")
-                                continue
-                    else:
-                        program_handle = input(f"{Colors.CYAN}Program handle (e.g., 'security'): {Colors.ENDC}").strip()
-
-                    if not program_handle:
-                        print(f"{Colors.RED}[!] No program selected{Colors.ENDC}")
-                        continue
-
-                    # Fetch program details
-                    print(f"\n{Colors.YELLOW}[*] Fetching program details for '{program_handle}'...{Colors.ENDC}")
-                    program = h1_client.get_program(program_handle)
-
-                    # Display formatted details
-                    print(h1_client.format_program_details(program))
-
-                    # Ask if user wants to analyze with AI
-                    analyze = input(f"\n{Colors.CYAN}Analyze this program with AI? [Y/n]: {Colors.ENDC}").strip().lower()
-                    if analyze != 'n':
-                        print(f"\n{Colors.YELLOW}[*] Preparing program data for AI analysis...{Colors.ENDC}")
-                        bounty_text = h1_client.export_program_for_analysis(program)
-
-                        print(f"{Colors.YELLOW}[*] Analyzing with DeepSeek AI...{Colors.ENDC}")
-                        analysis = suite.analyze_bounty(bounty_text)
-
-                        print(f"\n{Colors.GREEN}╔{'═' * 58}╗")
-                        print(f"║{Colors.BOLD}{'AI ANALYSIS RESULTS'.center(58)}{Colors.ENDC}{Colors.GREEN}║")
-                        print(f"╚{'═' * 58}╝{Colors.ENDC}")
-                        print(analysis)
-                        print(f"{Colors.GREEN}{'─' * 60}{Colors.ENDC}\n")
-
-                except Exception as e:
-                    print(f"{Colors.RED}[✗] Error: {e}{Colors.ENDC}")
+                handle_hackerone_fetch(suite)
+                continue
 
             elif choice == '6':
                 # Show Tool Status
                 show_tool_status()
+                continue
+
+            elif choice == '7' and FEATURES_AVAILABLE:
+                session_management_menu(session_manager)
                 continue
 
             elif choice == '1':
@@ -706,7 +866,7 @@ def main_interactive_loop(suite: DeepSeekSecuritySuite):
                     print(f"{Colors.GREEN}[✓] Found {len(available_tools)} available tools{Colors.ENDC}")
                     print(f"{Colors.YELLOW}[*] Generating commands with AI...{Colors.ENDC}")
                     commands = suite.generate_commands(target, available_tools)
-                    run_generated_commands(commands)
+                    run_generated_commands(commands, session_manager, output_parser)
                 except DeepSeekError as e:
                     print(f"{Colors.RED}[✗] Error: {e}{Colors.ENDC}")
 
@@ -724,7 +884,7 @@ def main_interactive_loop(suite: DeepSeekSecuritySuite):
                     print(f"{Colors.GREEN}[✓] Found {len(available_tools)} available tools{Colors.ENDC}")
                     print(f"{Colors.YELLOW}[*] Generating commands with AI...{Colors.ENDC}")
                     commands = suite.generate_commands(target, available_tools)
-                    run_generated_commands(commands)
+                    run_generated_commands(commands, session_manager, output_parser)
                 except DeepSeekError as e:
                     print(f"{Colors.RED}[✗] Error: {e}{Colors.ENDC}")
             
@@ -749,6 +909,28 @@ def main_interactive_loop(suite: DeepSeekSecuritySuite):
                 # Clear History
                 suite.clear_history()
                 print("Conversation history cleared.")
+
+            elif choice == '8' and FEATURES_AVAILABLE:
+                # Generate Report
+                if not report_generator or not session_manager:
+                    print(f"{Colors.RED}[!] Report generator/session manager not available.{Colors.ENDC}")
+                    continue
+                if not session_manager.current_session:
+                    print(f"{Colors.RED}[!] No active session to generate a report from.{Colors.ENDC}")
+                    continue
+
+                try:
+                    format_choice = input("Enter report format (md/html) [html]: ").strip().lower() or "html"
+                    if format_choice not in ["md", "html"]:
+                        print(f"{Colors.RED}[!] Invalid format. Defaulting to HTML.{Colors.ENDC}")
+                        format_choice = "html"
+
+                    report_path = report_generator.save_report(session_manager.current_session, format=format_choice)
+                    print(f"\n{Colors.GREEN}[✓] Report saved successfully:{Colors.ENDC}")
+                    print(f"  {Colors.CYAN}{os.path.abspath(report_path)}{Colors.ENDC}")
+
+                except Exception as e:
+                    print(f"{Colors.RED}[✗] Failed to generate report: {e}{Colors.ENDC}")
             
             else:
                 print(f"Unknown command: '{choice}'. Type 'menu' for options.")
