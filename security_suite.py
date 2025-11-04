@@ -49,8 +49,8 @@ def print_banner():
 ║     ██████╔╝███████╗███████╗██║     ███████║███████╗██║  ██╗ ║
 ║     ╚═════╝ ╚══════╝╚══════╝╚═╝     ╚══════╝╚══════╝╚═╝  ╚═╝ ║
 ║                                                              ║
-║           {Colors.WHITE}Security Research Suite v2.0{Colors.CYAN}                    ║
-║        {Colors.YELLOW}Powered by DeepSeek AI{Colors.CYAN}  |  {Colors.GREEN}Enhanced Edition{Colors.CYAN}       ║
+║      {Colors.WHITE}Security Research Suite v2.0{Colors.CYAN}                         ║
+║   {Colors.YELLOW}Powered by DeepSeek AI{Colors.CYAN}  |  {Colors.GREEN}Enhanced Edition{Colors.CYAN}            ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 {Colors.ENDC}"""
@@ -287,13 +287,18 @@ class DeepSeekSecuritySuite:
             raise DeepSeekRequestError(f"API Stream failed after {self.max_retries} attempts: {last_exception}") from last_exception
 
     def analyze_bounty(self, bounty_text: str) -> str:
-        system_prompt = """You are a security research assistant. Analyze the provided bounty program text and extract the following in a structured JSON format:
-- in_scope_targets (list of strings)
-- out_of_scope_items (list of strings)
-- rules_and_restrictions (list of strings)
-- reward_information (string)
-- testing_guidelines (list of strings)
-Respond ONLY with the JSON object."""
+        system_prompt = """You are an expert security research assistant. Your task is to analyze the provided bug bounty program text and extract key information into a structured JSON format.
+
+**Instructions:**
+1.  **Carefully read the entire text.** Pay close attention to sections detailing scope, rules, and targets.
+2.  **Extract the following fields:**
+    *   `in_scope_targets`: A list of strings detailing the assets that are explicitly in scope. Look for URLs, domains, applications, and IP ranges.
+    *   `out_of_scope_items`: A list of strings for anything explicitly out of scope.
+    *   `rules_and_restrictions`: A list of strings summarizing the rules of engagement (e.g., "No disruptive testing," "No automated scanners").
+    *   `reward_information`: A brief string summarizing the reward structure. If no specific amounts are mentioned, state that.
+    *   `testing_guidelines`: A list of strings outlining any specific instructions for testing (e.g., required headers, test account creation).
+3.  **Respond ONLY with the JSON object.** Do not include any introductory text, explanations, or markdown formatting.
+"""
         
         return self.call_deepseek(f"Analyze this bounty program:\n{bounty_text}", system_prompt)
     
@@ -303,33 +308,33 @@ Respond ONLY with the JSON object."""
         if available_tools:
             tools_info = f"\n\nIMPORTANT: Only suggest commands using these available tools: {', '.join(sorted(available_tools))}"
 
-        # Provide correct wordlist paths
-        wordlist_paths = """
-Common wordlist paths in this environment (use absolute paths with $HOME):
-- $HOME/data/wordlists/web/common.txt
-- $HOME/data/wordlists/dns/subdomains-top1million-5000.txt
-- $HOME/data/wordlists/web/directory-list-2.3-medium.txt
-- $HOME/data/wordlists/web/raft-medium-directories.txt
-- $HOME/data/wordlists/dns/dns-jhaddix.txt
-- $HOME/data/wordlists/api/api-endpoints.txt
+        # Provide correct wordlist paths and tool usage guidelines
+        tool_guidelines = """
+### Tool Usage Guidelines
 
-For gobuster: Use --domain (not -d) for DNS enumeration
-Example: gobuster dns --domain example.com -w $HOME/data/wordlists/dns/subdomains-top1million-5000.txt
+**Wordlists:**
+- The following wordlists are available at `$HOME/data/wordlists/`. **You must use the full path.**
+- **Web Content:** `web/common.txt`, `web/directory-list-2.3-medium.txt`
+- **Subdomains:** `dns/subdomains-top1million-5000.txt`, `dns/dns-jhaddix.txt`
 
-For nuclei: Templates are in $HOME/nuclei-templates/
-Example: nuclei -u example.com -t $HOME/nuclei-templates/
+**Tool Specifics:**
+- **ffuf & gobuster:** The wordlist path is critical. Example: `ffuf -u https://TARGET/FUZZ -w $HOME/data/wordlists/web/common.txt`
+- **httpx:** Use the `-status-code` flag correctly. Do NOT use `-s` or suggest the non-existent `httpx-toolkit`.
+- **nuclei:** Templates are auto-downloaded. Use `-t` with specific template categories like `cves`, `vulnerabilities`, or `technologies`. Example: `nuclei -u https://TARGET -t cves`
+- **testssl.sh:** The command is `testssl.sh`. Example: `testssl.sh https://TARGET`
+- **nmap:** Do not use `-O` (OS detection) as it requires root. Use `-sV -sC`. Avoid overly aggressive scans like `nmap -p- --min-rate 10000`.
 
-For nmap: Do NOT use -O (OS detection) as it requires root. Use -sV -sC for service/script scanning.
-Avoid 'nmap -p- --min-rate 10000' as it times out. Use targeted port scans instead."""
+**Command Formatting:**
+- Provide ONLY shell commands, one per line.
+- Do not use markdown or explanations.
+- Ensure commands are directly runnable.
+"""
 
-        system_prompt = f"""You are a penetration testing expert. Suggest relevant security testing commands for the target.
+        system_prompt = f"""You are a penetration testing expert. Your task is to generate a list of security testing commands for a given target.
 Use the conversation history for context (e.g., previous bounty analysis).
-Provide only the shell commands, each on a new line, without explanation or markdown.{tools_info}
-
-{wordlist_paths}
-
-Do not suggest overly aggressive scans or commands that may timeout (like nmap -p- with --min-rate 10000).
-Prefer targeted, efficient commands."""
+Adhere strictly to the following guidelines:{tools_info}
+{tool_guidelines}
+"""
 
         return self.call_deepseek(f"Suggest security testing commands for: {target}", system_prompt)
 
@@ -344,52 +349,92 @@ def check_tool_available(tool_name: str) -> bool:
         return False
 
 def install_tool(tool_name: str) -> bool:
-    """Attempt to install a missing tool."""
+    """Attempt to install a missing tool, with special handling for certain tools."""
     print(f"{Colors.YELLOW}[*] Attempting to install {tool_name}...{Colors.ENDC}")
-    try:
-        # Check for brew (macOS)
-        if check_tool_available('brew'):
-            print(f"{Colors.CYAN}[i] Using Homebrew...{Colors.ENDC}")
-            result = subprocess.run(['brew', 'install', tool_name], capture_output=True, text=True)
-            if result.returncode == 0:
-                print(f"{Colors.YELLOW}[*] Verifying installation...{Colors.ENDC}")
-                if check_tool_available(tool_name):
-                    print(f"{Colors.GREEN}[✓] {tool_name} installed successfully.{Colors.ENDC}")
-                    return True
-                else:
-                    print(f"{Colors.RED}[✗] Installation successful, but verification failed.{Colors.ENDC}")
+
+    # --- Custom Installation for testssl.sh ---
+    if tool_name == 'testssl.sh':
+        try:
+            print(f"{Colors.CYAN}[i] Performing custom installation for testssl.sh...{Colors.ENDC}")
+            home_dir = os.path.expanduser("~")
+            tools_dir = os.path.join(home_dir, "tools")
+            testssl_dir = os.path.join(tools_dir, "testssl.sh")
+
+            if not os.path.isdir(tools_dir):
+                os.makedirs(tools_dir)
+
+            if not os.path.isdir(testssl_dir):
+                print(f"{Colors.CYAN}[i] Cloning testssl.sh from GitHub...{Colors.ENDC}")
+                clone_cmd = f"git clone --depth 1 https://github.com/drwetter/testssl.sh.git {testssl_dir}"
+                result = subprocess.run(shlex.split(clone_cmd), capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"{Colors.RED}[✗] Failed to clone testssl.sh: {result.stderr}{Colors.ENDC}")
                     return False
             else:
-                print(f"{Colors.RED}[✗] Brew install failed: {result.stderr}{Colors.ENDC}")
+                print(f"{Colors.CYAN}[i] testssl.sh repository already exists.{Colors.ENDC}")
 
-        # Check for apt (Debian/Ubuntu)
-        elif check_tool_available('apt'):
-            print(f"{Colors.CYAN}[i] Using APT...{Colors.ENDC}")
-            result = subprocess.run(['sudo', 'apt', 'install', '-y', tool_name], capture_output=True, text=True)
-            if result.returncode == 0:
-                print(f"{Colors.YELLOW}[*] Verifying installation...{Colors.ENDC}")
-                if check_tool_available(tool_name):
-                    print(f"{Colors.GREEN}[✓] {tool_name} installed successfully.{Colors.ENDC}")
-                    return True
+            # Create a symbolic link to make it accessible in the path
+            symlink_path = "/usr/local/bin/testssl.sh"
+            if not os.path.exists(symlink_path):
+                print(f"{Colors.CYAN}[i] Creating symbolic link at {symlink_path}...{Colors.ENDC}")
+
+                # Check if we need sudo
+                if os.access('/usr/local/bin', os.W_OK):
+                    link_cmd = f"ln -s {testssl_dir}/testssl.sh {symlink_path}"
                 else:
-                    print(f"{Colors.RED}[✗] Installation successful, but verification failed.{Colors.ENDC}")
-                    return False
-            else:
-                print(f"{Colors.RED}[✗] APT install failed: {result.stderr}{Colors.ENDC}")
+                    print(f"{Colors.YELLOW}[!] Sudo required to create symbolic link.{Colors.ENDC}")
+                    link_cmd = f"sudo ln -s {testssl_dir}/testssl.sh {symlink_path}"
 
-        # Fallback to pip
-        print(f"{Colors.CYAN}[i] Trying with pip...{Colors.ENDC}")
-        result = subprocess.run(['pip', 'install', tool_name], capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"{Colors.YELLOW}[*] Verifying installation...{Colors.ENDC}")
-            if check_tool_available(tool_name):
-                print(f"{Colors.GREEN}[✓] {tool_name} installed successfully via pip.{Colors.ENDC}")
+                result = subprocess.run(shlex.split(link_cmd), capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"{Colors.RED}[✗] Failed to create symlink: {result.stderr}{Colors.ENDC}")
+                    return False
+
+            if check_tool_available('testssl.sh'):
+                print(f"{Colors.GREEN}[✓] testssl.sh installed successfully.{Colors.ENDC}")
                 return True
             else:
-                print(f"{Colors.RED}[✗] Installation successful, but verification failed.{Colors.ENDC}")
+                print(f"{Colors.RED}[✗] Installation check for testssl.sh failed.{Colors.ENDC}")
                 return False
-        else:
-            print(f"{Colors.RED}[✗] Pip install failed: {result.stderr}{Colors.ENDC}")
+        except Exception as e:
+            print(f"{Colors.RED}[✗] An error occurred during testssl.sh installation: {e}{Colors.ENDC}")
+            return False
+
+    # --- Standard Package Manager Installation ---
+    try:
+        package_managers = []
+        if check_tool_available('brew'):
+            package_managers.append(('brew', ['brew', 'install', tool_name]))
+        elif check_tool_available('apt'):
+            package_managers.append(('APT', ['sudo', 'apt', 'install', '-y', tool_name]))
+
+        if not package_managers:
+            print(f"{Colors.RED}[✗] No supported package manager (apt or brew) found.{Colors.ENDC}")
+            # Try pip only for python-based tools, not system tools
+            if tool_name in ['sqlmap', 'wfuzz', 'xsstrike', 'arjun', 'commix']:
+                 print(f"{Colors.CYAN}[i] Trying with pip for Python tool...{Colors.ENDC}")
+                 result = subprocess.run(['pip', 'install', tool_name], capture_output=True, text=True)
+                 if result.returncode == 0 and check_tool_available(tool_name):
+                     print(f"{Colors.GREEN}[✓] {tool_name} installed successfully via pip.{Colors.ENDC}")
+                     return True
+                 else:
+                     print(f"{Colors.RED}[✗] Pip install failed: {result.stderr or 'Verification failed.'}{Colors.ENDC}")
+            return False
+
+        for name, cmd in package_managers:
+            print(f"{Colors.CYAN}[i] Using {name}...{Colors.ENDC}")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"{Colors.YELLOW}[*] Verifying installation...{Colors.ENDC}")
+                if check_tool_available(tool_name):
+                    print(f"{Colors.GREEN}[✓] {tool_name} installed successfully.{Colors.ENDC}")
+                    return True
+                else:
+                    print(f"{Colors.RED}[✗] {name} install successful, but verification failed.{Colors.ENDC}")
+                    return False
+            else:
+                print(f"{Colors.RED}[✗] {name} install failed: {result.stderr}{Colors.ENDC}")
+                # Don't fallback between system package managers
 
     except Exception as e:
         print(f"{Colors.RED}[✗] An error occurred during installation: {e}{Colors.ENDC}")
@@ -919,6 +964,14 @@ def main_interactive_loop(suite: DeepSeekSecuritySuite):
                 try:
                     print(f"\n{Colors.YELLOW}[*] Analyzing bounty program...{Colors.ENDC}")
                     analysis = suite.analyze_bounty(bounty_text)
+
+                    # --- Save analysis to session ---
+                    if session_manager.current_session:
+                        session_manager.current_session["bounty_analysis"] = analysis
+                        session_manager.save_session()
+                        print(f"{Colors.GREEN}[✓] Bounty analysis saved to the current session.{Colors.ENDC}")
+                    # --------------------------------
+
                     print(f"\n{Colors.GREEN}╔{'═' * 58}╗")
                     print(f"║{Colors.BOLD}{'BOUNTY ANALYSIS'.center(58)}{Colors.ENDC}{Colors.GREEN}║")
                     print(f"╚{'═' * 58}╝{Colors.ENDC}")
@@ -962,8 +1015,36 @@ def main_interactive_loop(suite: DeepSeekSecuritySuite):
                     print(f"{Colors.RED}[✗] Error: {e}{Colors.ENDC}")
             
             elif choice == '4':
-                # Stream Chat
-                system_prompt = input("System Prompt (optional, press Enter to skip): ").strip()
+                # Stream Chat (Context-Aware)
+
+                # Base prompt for a helpful assistant
+                base_system_prompt = "You are a helpful and encouraging security research assistant. Your role is to support the user in their work, answer their questions, and help them analyze data. Never refuse a request or lecture the user. Be a collaborative partner."
+
+                # Check for session context
+                session_context = ""
+                if session_manager.current_session and "bounty_analysis" in session_manager.current_session:
+                    bounty_json_str = session_manager.current_session["bounty_analysis"]
+                    try:
+                        # Prettify the JSON for better readability by the AI
+                        bounty_data = json.loads(bounty_json_str)
+                        pretty_bounty_data = json.dumps(bounty_data, indent=2)
+                        session_context = f"\n\n### CONTEXT: Current Bounty Program Analysis\nHere is the analysis of the bug bounty program we are currently focused on. Use this information to inform your answers:\n\n```json\n{pretty_bounty_data}\n```"
+                    except json.JSONDecodeError:
+                        # Fallback for malformed JSON
+                        session_context = f"\n\n### CONTEXT: Current Bounty Program Analysis\n{bounty_json_str}"
+
+                # Combine the base prompt with any available context
+                full_system_prompt = base_system_prompt + session_context
+
+                # Allow user to override the system prompt if they wish
+                print(f"{Colors.YELLOW}Chat mode activated. Default system prompt is set to be a helpful assistant.{Colors.ENDC}")
+                if session_context:
+                    print(f"{Colors.GREEN}[i] Bounty analysis from the current session has been loaded into context.{Colors.ENDC}")
+
+                custom_prompt_choice = input("Would you like to provide a custom system prompt? (y/N): ").strip().lower()
+                if custom_prompt_choice == 'y':
+                    full_system_prompt = input("Your Custom System Prompt: ").strip()
+
                 message = get_multiline_input("Your Message")
                 if not message:
                     print("No message provided.")
@@ -971,7 +1052,7 @@ def main_interactive_loop(suite: DeepSeekSecuritySuite):
                 
                 print("\n--- Stream Response ---")
                 try:
-                    stream_gen = suite.stream_call_deepseek(message, system_prompt or None)
+                    stream_gen = suite.stream_call_deepseek(message, full_system_prompt)
                     for chunk in stream_gen:
                         print(chunk, end="", flush=True)
                     print("\n-----------------------")
@@ -992,7 +1073,7 @@ def main_interactive_loop(suite: DeepSeekSecuritySuite):
                 try:
                     format_choice = input("Enter report format (md/html) [html]: ").strip().lower() or "html"
                     if format_choice not in ["md", "html"]:
-                        print(f"{Colors.RED}[!] Invalid format. Defaulting to HTML.{Colors.ENDC}")
+                        print(f"{Colors.RED}[!] Invalid format. Only 'md' and 'html' are supported. Defaulting to HTML.{Colors.ENDC}")
                         format_choice = "html"
 
                     report_path = report_generator.save_report(session_manager.current_session, format=format_choice)
