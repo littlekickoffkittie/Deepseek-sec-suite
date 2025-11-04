@@ -343,6 +343,59 @@ def check_tool_available(tool_name: str) -> bool:
     except:
         return False
 
+def install_tool(tool_name: str) -> bool:
+    """Attempt to install a missing tool."""
+    print(f"{Colors.YELLOW}[*] Attempting to install {tool_name}...{Colors.ENDC}")
+    try:
+        # Check for brew (macOS)
+        if check_tool_available('brew'):
+            print(f"{Colors.CYAN}[i] Using Homebrew...{Colors.ENDC}")
+            result = subprocess.run(['brew', 'install', tool_name], capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"{Colors.YELLOW}[*] Verifying installation...{Colors.ENDC}")
+                if check_tool_available(tool_name):
+                    print(f"{Colors.GREEN}[✓] {tool_name} installed successfully.{Colors.ENDC}")
+                    return True
+                else:
+                    print(f"{Colors.RED}[✗] Installation successful, but verification failed.{Colors.ENDC}")
+                    return False
+            else:
+                print(f"{Colors.RED}[✗] Brew install failed: {result.stderr}{Colors.ENDC}")
+
+        # Check for apt (Debian/Ubuntu)
+        elif check_tool_available('apt'):
+            print(f"{Colors.CYAN}[i] Using APT...{Colors.ENDC}")
+            result = subprocess.run(['sudo', 'apt', 'install', '-y', tool_name], capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"{Colors.YELLOW}[*] Verifying installation...{Colors.ENDC}")
+                if check_tool_available(tool_name):
+                    print(f"{Colors.GREEN}[✓] {tool_name} installed successfully.{Colors.ENDC}")
+                    return True
+                else:
+                    print(f"{Colors.RED}[✗] Installation successful, but verification failed.{Colors.ENDC}")
+                    return False
+            else:
+                print(f"{Colors.RED}[✗] APT install failed: {result.stderr}{Colors.ENDC}")
+
+        # Fallback to pip
+        print(f"{Colors.CYAN}[i] Trying with pip...{Colors.ENDC}")
+        result = subprocess.run(['pip', 'install', tool_name], capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"{Colors.YELLOW}[*] Verifying installation...{Colors.ENDC}")
+            if check_tool_available(tool_name):
+                print(f"{Colors.GREEN}[✓] {tool_name} installed successfully via pip.{Colors.ENDC}")
+                return True
+            else:
+                print(f"{Colors.RED}[✗] Installation successful, but verification failed.{Colors.ENDC}")
+                return False
+        else:
+            print(f"{Colors.RED}[✗] Pip install failed: {result.stderr}{Colors.ENDC}")
+
+    except Exception as e:
+        print(f"{Colors.RED}[✗] An error occurred during installation: {e}{Colors.ENDC}")
+
+    return False
+
 def get_available_tools() -> Set[str]:
     """Get a set of all available security tools."""
     common_tools = [
@@ -439,12 +492,19 @@ def run_generated_commands(command_string: str, session_manager: Optional[Sessio
 
         if unavailable_cmds:
             print(f"\n{Colors.YELLOW}⚠️  Warning: {len(unavailable_cmds)} command(s) use unavailable tools:{Colors.ENDC}")
-            for cmd in unavailable_cmds[:5]:  # Show first 5
+            for cmd in unavailable_cmds[:5]:
                 tool = extract_tool_from_command(cmd)
                 print(f"  {Colors.RED}✗{Colors.ENDC} {tool}: {cmd[:60]}...")
-            if len(unavailable_cmds) > 5:
-                print(f"  {Colors.YELLOW}... and {len(unavailable_cmds) - 5} more{Colors.ENDC}")
-            print(f"\n{Colors.CYAN}💡 Tip: Run './setup-security-tools.sh' to install missing tools{Colors.ENDC}")
+
+            install_choice = input("Attempt to install missing tools? (y/N): ").strip().lower()
+            if install_choice == 'y':
+                for cmd in unavailable_cmds:
+                    tool = extract_tool_from_command(cmd)
+                    if install_tool(tool):
+                        available_tools.add(tool)
+
+                # Re-filter commands after installation
+                available_cmds, unavailable_cmds = filter_commands_by_availability(command_string, available_tools)
 
         commands = available_cmds
 
@@ -582,7 +642,15 @@ def show_tool_status():
         for i in range(0, len(missing_list), cols):
             row = missing_list[i:i+cols]
             print("  " + "  ".join(f"{Colors.RED}✗{Colors.ENDC} {tool:15s}" for tool in row))
-        print(f"\n{Colors.YELLOW}💡 Tip:{Colors.ENDC} Run {Colors.CYAN}'./setup-security-tools.sh'{Colors.ENDC} to install missing tools")
+
+        install_choice = input("Attempt to install all missing tools? (y/N): ").strip().lower()
+        if install_choice == 'y':
+            for tool in missing_list:
+                install_tool(tool)
+            print(f"\n{Colors.GREEN}[*] Tool installation process finished.{Colors.ENDC}")
+            # Re-run status check
+            show_tool_status()
+            return
 
     print(f"\n{Colors.CYAN}{'═' * 60}{Colors.ENDC}\n")
 
