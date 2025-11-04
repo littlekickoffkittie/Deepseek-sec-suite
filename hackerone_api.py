@@ -133,8 +133,13 @@ class HackerOneAPI:
         Returns:
             Program details dictionary
         """
-        result = self._make_request("GET", f"hackers/programs/{program_handle}")
-        return result.get("data", {})
+        response = self._make_request("GET", f"hackers/programs/{program_handle}")
+        # The program data could be under the 'data' key or be the response itself
+        if 'data' in response and response['data']:
+            return response['data']
+        # If 'data' is not there or is empty, return the whole response
+        # It might be the program object itself, or an empty dict to signal failure
+        return response
 
     def search_programs(self, query: str, programs: Optional[List[Dict]] = None) -> List[Dict]:
         """
@@ -173,7 +178,11 @@ class HackerOneAPI:
         Returns:
             Formatted string with program details
         """
-        attrs = program.get("attributes", {})
+        # The program data could be under an 'attributes' key, or the dict itself could be the attributes
+        if 'attributes' in program:
+            attrs = program.get("attributes", {})
+        else:
+            attrs = program
 
         # Basic info
         name = attrs.get("name", "N/A")
@@ -256,7 +265,11 @@ class HackerOneAPI:
         Returns:
             Formatted text for AI analysis
         """
-        attrs = program.get("attributes", {})
+        # The program data could be under an 'attributes' key, or the dict itself could be the attributes
+        if 'attributes' in program:
+            attrs = program.get("attributes", {})
+        else:
+            attrs = program
 
         # Build analysis-friendly format
         output = f"""BUG BOUNTY PROGRAM DETAILS
