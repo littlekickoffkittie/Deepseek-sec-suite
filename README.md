@@ -19,16 +19,6 @@ A comprehensive security testing suite that combines DeepSeek AI with HackerOne'
 
 ## 🚀 Quick Start
 
-### Prerequisites
-
-```bash
-# Python 3.12+
-python --version
-
-# Required packages
-pip install requests python-dotenv
-```
-
 ### Installation
 
 ```bash
@@ -36,8 +26,8 @@ pip install requests python-dotenv
 git clone https://github.com/yourusername/deepseek-security-suite.git
 cd deepseek-security-suite
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies and test packages
+pip install -e ".[test]"
 
 # Set up credentials
 cp .env.example .env
@@ -72,13 +62,15 @@ python security_suite.py
 ### Main Menu Options
 
 ```
-[0] Fetch Program from HackerOne    - Direct API access to bug bounty programs
-[1] Analyze Bounty                  - Paste and analyze bounty program details
-[2] Generate Commands                - AI-powered security testing commands
-[3] Run Commands for Target          - Execute generated commands
-[4] Stream Free-form Chat            - Interactive AI assistance
-[5] Clear Conversation History       - Reset context
-[6] Show Tool Status                 - Check installed security tools
+[0] Fetch Program from HackerOne    - Auto-analyze and create a session
+[1] Analyze Bounty                  - Paste and analyze bounty details
+[2] Generate Commands               - AI-powered security testing commands
+[3] Run Commands for Target         - Execute generated commands in a session
+[4] Stream Free-form Chat           - Interactive AI assistance
+[5] Clear Conversation History      - Reset AI context
+[6] Show Tool Status                - Check for installed security tools
+[7] Session Management              - Create, load, or delete testing sessions
+[8] Generate Report                 - Create a full report from a session
 ```
 
 ### Example Workflow
@@ -87,19 +79,28 @@ python security_suite.py
 # 1. Start the suite
 python security_suite.py
 
-# 2. Fetch a program from HackerOne
+# 2. Create a new session for your target
+[Main] ▶ 7
+[Session] ▶ 1
+Enter target (e.g., example.com): api.example.com
+
+# 3. Fetch a program and let the AI analyze it
 [Main] ▶ 0
-Search query: stripe
+Search query: ExampleCorp
 
-# 3. Select program and analyze
-# Program details are automatically analyzed by AI
-
-# 4. Generate testing commands
+# 4. Generate and run context-aware commands
 [Main] ▶ 2
-Target: api.stripe.com
+Target: api.example.com
+# Commands are generated...
+Do you want to run these commands? (all/one/N) [N]: all
 
-# 5. Review and execute commands
-# Follow the prompts to run suggested security tests
+# 5. View session summary
+[Main] ▶ 7
+[Session] ▶ 5
+
+# 6. Generate a professional HTML report
+[Main] ▶ 8
+Enter report format (md/html) [html]: html
 ```
 
 ## 🧪 Testing
@@ -150,19 +151,19 @@ test_integration.py::TestIntegration       6 passed   ✓
 
 ```
 deepseek-security-suite/
-├── security_suite.py                      # Main application
+├── security_suite.py           # Main application
 ├── hackerone_api.py            # HackerOne API client
+├── session_manager.py          # Session management module
+├── output_parser.py            # Tool output parsing module
+├── report_generator.py         # Report generation module
 ├── tests/
 │   ├── test_hackerone_api.py   # HackerOne tests
-│   ├── test_sec_deepseek.py    # DeepSeek tests
-│   ├── test_integration.py     # Integration tests
-│   └── run_tests.sh            # Test runner script
+│   └── ...                     # Other test files
 ├── docs/
-│   ├── HACKERONE_SETUP.md      # HackerOne setup guide
-│   └── TEST_SUMMARY.md         # Detailed test report
+│   └── ...
 ├── .env.example                # Environment variables template
 ├── .gitignore                  # Git ignore rules
-├── requirements.txt            # Python dependencies
+├── pyproject.toml              # Project metadata and dependencies
 └── README.md                   # This file
 ```
 
@@ -198,8 +199,8 @@ The suite implements smart retry logic:
 ### Setting Up Development Environment
 
 ```bash
-# Install development dependencies
-pip install pytest pytest-mock
+# Install in editable mode with test and dev dependencies
+pip install -e ".[test,dev]"
 
 # Run tests with coverage
 pytest tests/ --cov=. --cov-report=html

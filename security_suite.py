@@ -17,14 +17,9 @@ except ImportError:
     HACKERONE_AVAILABLE = False
 
 # Local imports for new features
-try:
-    from session_manager import SessionManager
-    from output_parser import OutputParser
-    from report_generator import ReportGenerator
-    FEATURES_AVAILABLE = True
-except ImportError as e:
-    FEATURES_AVAILABLE = False
-    print(f"Feature import error: {e}")
+from session_manager import SessionManager
+from output_parser import OutputParser
+from report_generator import ReportGenerator
 
 # --- Color Definitions ---
 class Colors:
@@ -701,9 +696,8 @@ def print_main_menu():
     print(f"║  {Colors.GREEN}[4]{Colors.ENDC} Stream Free-form Chat".ljust(67) + "║")
     print(f"║  {Colors.GREEN}[5]{Colors.ENDC} Clear Conversation History".ljust(67) + "║")
     print(f"║  {Colors.GREEN}[6]{Colors.ENDC} Show Tool Status".ljust(67) + "║")
-    if FEATURES_AVAILABLE:
-        print(f"║  {Colors.GREEN}[7]{Colors.ENDC} Session Management".ljust(67) + "║")
-        print(f"║  {Colors.GREEN}[8]{Colors.ENDC} Generate Report".ljust(67) + "║")
+    print(f"║  {Colors.GREEN}[7]{Colors.ENDC} Session Management".ljust(67) + "║")
+    print(f"║  {Colors.GREEN}[8]{Colors.ENDC} Generate Report".ljust(67) + "║")
     print(f"║  {Colors.RED}[q]{Colors.ENDC} Quit".ljust(67) + "║")
     print(f"╚{'═' * 58}╝{Colors.ENDC}\n")
 
@@ -791,12 +785,9 @@ def handle_hackerone_fetch(suite: DeepSeekSecuritySuite):
 
 def main_interactive_loop(suite: DeepSeekSecuritySuite):
     """Runs the main interactive REPL for the security suite."""
-    if FEATURES_AVAILABLE:
-        session_manager = SessionManager()
-        output_parser = OutputParser()
-        report_generator = ReportGenerator()
-    else:
-        session_manager, output_parser, report_generator = None, None, None
+    session_manager = SessionManager()
+    output_parser = OutputParser()
+    report_generator = ReportGenerator()
 
     print_banner()
     print(f"{Colors.YELLOW}Type {Colors.CYAN}'menu'{Colors.YELLOW} for options or {Colors.RED}'quit'{Colors.YELLOW} to exit.{Colors.ENDC}\n")
@@ -832,7 +823,7 @@ def main_interactive_loop(suite: DeepSeekSecuritySuite):
                 show_tool_status()
                 continue
 
-            elif choice == '7' and FEATURES_AVAILABLE:
+            elif choice == '7':
                 session_management_menu(session_manager)
                 continue
 
@@ -910,11 +901,8 @@ def main_interactive_loop(suite: DeepSeekSecuritySuite):
                 suite.clear_history()
                 print("Conversation history cleared.")
 
-            elif choice == '8' and FEATURES_AVAILABLE:
+            elif choice == '8':
                 # Generate Report
-                if not report_generator or not session_manager:
-                    print(f"{Colors.RED}[!] Report generator/session manager not available.{Colors.ENDC}")
-                    continue
                 if not session_manager.current_session:
                     print(f"{Colors.RED}[!] No active session to generate a report from.{Colors.ENDC}")
                     continue
