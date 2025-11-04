@@ -1,251 +1,170 @@
-#!/usr/bin/env python3
-"""
-Unit tests for HackerOne API client
-"""
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import requests
 from hackerone_api import HackerOneAPI
 
+@pytest.fixture
+def mock_h1_client():
+    """Fixture for a HackerOneAPI client with mocked requests."""
+    with patch('requests.get') as mock_get:
+        yield HackerOneAPI("testuser", "testtoken"), mock_get
 
 class TestHackerOneAPI:
-    """Test suite for HackerOne API client"""
+    """Test suite for the updated HackerOne API client."""
 
     def test_init_with_valid_credentials(self):
-        """Test initialization with valid credentials"""
+        """Test initialization with valid credentials."""
         client = HackerOneAPI("testuser", "testtoken")
         assert client.auth == ("testuser", "testtoken")
         assert client.timeout == 30
         assert "Accept" in client.headers
-        assert "application/json" in client.headers["Accept"]
+        assert client.headers["Accept"] == "application/json"
 
     def test_init_without_credentials(self):
-        """Test initialization fails without credentials"""
-        with pytest.raises(ValueError, match="username and API token are required"):
+        """Test initialization fails without credentials."""
+        with pytest.raises(ValueError, match="HackerOne username and token are required."):
             HackerOneAPI("", "")
 
-    def test_init_with_custom_timeout(self):
-        """Test initialization with custom timeout"""
-        client = HackerOneAPI("testuser", "testtoken", timeout=60)
-        assert client.timeout == 60
-
-    @patch('requests.request')
-    def test_make_request_success(self, mock_request):
-        """Test successful API request"""
+    def test_make_request_success(self, mock_h1_client):
+        """Test a successful API request."""
+        client, mock_get = mock_h1_client
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"data": [{"id": "1"}]}
-        mock_request.return_value = mock_response
+        mock_response.json.return_value = {"data": "success"}
+        mock_get.return_value = mock_response
 
-        client = HackerOneAPI("testuser", "testtoken")
-        result = client._make_request("GET", "hackers/programs")
+        response = client._make_request("test_endpoint")
+        assert response == {"data": "success"}
+        mock_get.assert_called_once()
 
-        assert result == {"data": [{"id": "1"}]}
-        mock_request.assert_called_once()
-
-    @patch('requests.request')
-    def test_make_request_401_error(self, mock_request):
-        """Test authentication failure"""
+    def test_make_request_401_error(self, mock_h1_client):
+        """Test handling of a 401 Unauthorized error."""
+        client, mock_get = mock_h1_client
         mock_response = Mock()
         mock_response.status_code = 401
-        mock_response.text = "Unauthorized"
         mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
-        mock_request.return_value = mock_response
+        mock_get.return_value = mock_response
 
-        client = HackerOneAPI("baduser", "badtoken")
+        with pytest.raises(ConnectionRefusedError, match="HackerOne API authentication failed"):
+            client._make_request("test_endpoint")
 
-        with pytest.raises(Exception, match="Authentication failed"):
-            client._make_request("GET", "hackers/programs")
-
-    @patch('requests.request')
-    def test_make_request_404_error(self, mock_request):
-        """Test resource not found"""
+    def test_make_request_404_error(self, mock_h1_client):
+        """Test handling of a 404 Not Found error."""
+        client, mock_get = mock_h1_client
         mock_response = Mock()
         mock_response.status_code = 404
-        mock_response.text = "Not Found"
         mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
-        mock_request.return_value = mock_response
+        mock_get.return_value = mock_response
 
-        client = HackerOneAPI("testuser", "testtoken")
+        with pytest.raises(FileNotFoundError, match="Resource not found"):
+            client._make_request("test_endpoint")
 
-        with pytest.raises(Exception, match="Resource not found"):
-            client._make_request("GET", "hackers/programs/nonexistent")
+    def test_make_request_timeout(self, mock_h1_client):
+        """Test handling of a request timeout."""
+        client, mock_get = mock_h1_client
+        mock_get.side_effect = requests.exceptions.Timeout("Request timed out")
 
-    @patch('requests.request')
-    def test_make_request_timeout(self, mock_request):
-        """Test request timeout"""
-        mock_request.side_effect = requests.exceptions.Timeout()
+        with pytest.raises(TimeoutError, match="timed out"):
+            client._make_request("test_endpoint")
 
-        client = HackerOneAPI("testuser", "testtoken", timeout=5)
+    def test_search_programs_pagination(self, mock_h1_client):
+        """Test that program search handles pagination correctly."""
+        client, mock_get = mock_h1_client
 
-        with pytest.raises(Exception, match="timed out"):
-            client._make_request("GET", "hackers/programs")
-
-    @patch('requests.request')
-    def test_list_programs(self, mock_request):
-        """Test listing programs"""
-        # Mock first page
+        # Mock first page response
         mock_response1 = Mock()
         mock_response1.status_code = 200
         mock_response1.json.return_value = {
-            "data": [
-                {"id": "1", "attributes": {"handle": "program1", "name": "Program 1"}},
-                {"id": "2", "attributes": {"handle": "program2", "name": "Program 2"}}
-            ],
-            "links": {"next": "page2"}
+            "data": [{"id": 1}, {"id": 2}],
+            "links": {"next": "https://api.hackerone.com/v1/programs?page[number]=2"}
         }
 
-        # Mock second page (last page)
+        # Mock second page response
         mock_response2 = Mock()
         mock_response2.status_code = 200
-        mock_response2.json.return_value = {
-            "data": [
-                {"id": "3", "attributes": {"handle": "program3", "name": "Program 3"}}
-            ],
-            "links": {}  # No next link
-        }
+        mock_response2.json.return_value = {"data": [{"id": 3}]} # No 'next' link
 
-        mock_request.side_effect = [mock_response1, mock_response2]
+        mock_get.side_effect = [mock_response1, mock_response2]
 
-        client = HackerOneAPI("testuser", "testtoken")
-        programs = client.list_programs(page_size=2)
-
+        programs = client.search_programs("test", max_pages=2)
         assert len(programs) == 3
-        assert programs[0]["id"] == "1"
-        assert programs[2]["id"] == "3"
-        assert mock_request.call_count == 2
+        assert programs[2]['id'] == 3
+        assert mock_get.call_count == 2
 
-    @patch('requests.request')
-    def test_get_program(self, mock_request):
-        """Test getting specific program details"""
+    def test_get_program(self, mock_h1_client):
+        """Test fetching a single program."""
+        client, mock_get = mock_h1_client
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
+        mock_response.json.return_value = {"data": {"attributes": {"handle": "test_program"}}}
+        mock_get.return_value = mock_response
+
+        program = client.get_program("test_program")
+        assert program["data"]["attributes"]["handle"] == "test_program"
+        mock_get.assert_called_with(
+            f"{client.BASE_URL}/programs/test_program",
+            auth=client.auth,
+            params=None,
+            timeout=client.timeout,
+            headers=client.headers
+        )
+
+    def test_format_program_details(self):
+        """Test the static method for formatting program details."""
+        program_data = {
             "data": {
-                "id": "1",
                 "attributes": {
-                    "handle": "security",
-                    "name": "HackerOne",
-                    "url": "https://hackerone.com/security"
+                    "name": "Test Program",
+                    "handle": "testprog",
+                    "url": "https://hackerone.com/testprog",
+                    "offers_bounties": True,
+                    "structured_scopes": {
+                        "data": [{
+                            "attributes": {
+                                "asset_type": "URL",
+                                "asset_identifier": "example.com",
+                                "eligible_for_bounty": True
+                            }
+                        }]
+                    },
+                    "targets_out_of_scope": "No admin panels."
                 }
             }
         }
-        mock_request.return_value = mock_response
-
-        client = HackerOneAPI("testuser", "testtoken")
-        program = client.get_program("security")
-
-        assert program["id"] == "1"
-        assert program["attributes"]["handle"] == "security"
-        mock_request.assert_called_once()
-
-    def test_search_programs(self):
-        """Test searching programs"""
-        programs = [
-            {"attributes": {"handle": "stripe", "name": "Stripe"}},
-            {"attributes": {"handle": "security", "name": "HackerOne"}},
-            {"attributes": {"handle": "rails", "name": "Ruby on Rails"}}
-        ]
-
-        client = HackerOneAPI("testuser", "testtoken")
-
-        # Search by handle
-        matches = client.search_programs("stripe", programs)
-        assert len(matches) == 1
-        assert matches[0]["attributes"]["handle"] == "stripe"
-
-        # Search by name (case insensitive)
-        matches = client.search_programs("hackerone", programs)
-        assert len(matches) == 1
-        assert matches[0]["attributes"]["handle"] == "security"
-
-        # Search with no matches
-        matches = client.search_programs("nonexistent", programs)
-        assert len(matches) == 0
-
-        # Search partial match
-        matches = client.search_programs("rail", programs)
-        assert len(matches) == 1
-        assert matches[0]["attributes"]["handle"] == "rails"
-
-    def test_format_program_details(self):
-        """Test formatting program details"""
-        program = {
-            "attributes": {
-                "name": "Test Program",
-                "handle": "testprog",
-                "url": "https://hackerone.com/testprog",
-                "state": "open",
-                "submission_state": "open",
-                "offers_bounties": True,
-                "offers_swag": False,
-                "resolved_report_count": 100,
-                "currency": "USD",
-                "structured_scopes": {
-                    "data": [
-                        {
-                            "attributes": {
-                                "asset_type": "URL",
-                                "asset_identifier": "https://example.com",
-                                "eligible_for_bounty": True,
-                                "eligible_for_submission": True
-                            }
-                        }
-                    ]
-                },
-                "targets_out_of_scope": "*.example.com/admin",
-                "policy": "Please follow responsible disclosure"
-            }
-        }
-
-        client = HackerOneAPI("testuser", "testtoken")
-        formatted = client.format_program_details(program)
-
-        assert "Test Program" in formatted
-        assert "testprog" in formatted
-        assert "https://example.com" in formatted
-        assert "URL" in formatted
-        assert "*.example.com/admin" in formatted
-        assert "responsible disclosure" in formatted
+        formatted = HackerOneAPI.format_program_details(program_data)
+        assert "Name: Test Program" in formatted
+        assert "Handle: testprog" in formatted
+        assert "URL: example.com (Bounty Eligible)" in formatted
+        assert "Out-of-Scope" in formatted
+        assert "No admin panels" in formatted
 
     def test_export_program_for_analysis(self):
-        """Test exporting program for AI analysis"""
-        program = {
-            "attributes": {
-                "name": "Test Program",
-                "handle": "testprog",
-                "url": "https://hackerone.com/testprog",
-                "state": "open",
-                "submission_state": "open",
-                "offers_bounties": True,
-                "structured_scopes": {
-                    "data": [
-                        {
+        """Test the method for exporting program details for AI analysis."""
+        program_data = {
+            "data": {
+                "attributes": {
+                    "name": "Test Program",
+                    "handle": "testprog",
+                    "policy": "Be responsible.",
+                    "structured_scopes": {
+                        "data": [{
                             "attributes": {
                                 "asset_type": "URL",
-                                "asset_identifier": "https://example.com",
-                                "eligible_for_bounty": True
+                                "asset_identifier": "test.com",
+                                "eligible_for_bounty": False
                             }
-                        }
-                    ]
-                },
-                "targets_out_of_scope": "Admin panels",
-                "policy": "Test responsibly"
+                        }]
+                    },
+                    "targets_out_of_scope": "staging.test.com"
+                }
             }
         }
-
-        client = HackerOneAPI("testuser", "testtoken")
-        exported = client.export_program_for_analysis(program)
-
+        exported = HackerOneAPI.export_program_for_analysis(program_data)
         assert "BUG BOUNTY PROGRAM DETAILS" in exported
-        assert "Test Program" in exported
-        assert "IN SCOPE TARGETS" in exported
-        assert "https://example.com" in exported
-        assert "OUT OF SCOPE" in exported
-        assert "Admin panels" in exported
-        assert "POLICY & RULES" in exported
-        assert "Test responsibly" in exported
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+        assert "Program Name: Test Program" in exported
+        assert "IN SCOPE TARGETS:" in exported
+        assert "Identifier: test.com" in exported
+        assert "OUT OF SCOPE:" in exported
+        assert "staging.test.com" in exported
+        assert "POLICY & RULES:" in exported
+        assert "Be responsible." in exported
