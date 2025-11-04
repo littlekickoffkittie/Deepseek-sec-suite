@@ -694,6 +694,7 @@ def print_main_menu():
     print(f"║  {Colors.GREEN}[2]{Colors.ENDC} Generate Commands {Colors.YELLOW}(uses context){Colors.CYAN}".ljust(75) + "║")
     print(f"║  {Colors.GREEN}[3]{Colors.ENDC} Run Commands for Target {Colors.YELLOW}(clears context){Colors.CYAN}".ljust(75) + "║")
     print(f"║  {Colors.GREEN}[4]{Colors.ENDC} Stream Free-form Chat".ljust(67) + "║")
+    print(f"║  {Colors.GREEN}[h1]{Colors.ENDC} HackerOne Menu".ljust(67) + "║")
     print(f"║  {Colors.GREEN}[5]{Colors.ENDC} Clear Conversation History".ljust(67) + "║")
     print(f"║  {Colors.GREEN}[6]{Colors.ENDC} Show Tool Status".ljust(67) + "║")
     print(f"║  {Colors.GREEN}[7]{Colors.ENDC} Session Management".ljust(67) + "║")
@@ -726,7 +727,7 @@ def handle_hackerone_fetch(suite: DeepSeekSecuritySuite):
         print(f"║{Colors.BOLD}{'HACKERONE PROGRAM FETCH'.center(58)}{Colors.ENDC}{Colors.CYAN}║")
         print(f"╚{'═' * 58}╝{Colors.ENDC}\n")
 
-        search_choice = input(f"{Colors.CYAN}[1] Search programs [2] Enter handle directly: {Colors.ENDC}").strip()
+        search_choice = input(f"{Colors.CYAN}[1] Search programs [2] Enter handle directly [3] List programs: {Colors.ENDC}").strip()
 
         program_handle = None
         if search_choice == '1':
@@ -755,6 +756,19 @@ def handle_hackerone_fetch(suite: DeepSeekSecuritySuite):
                 except ValueError:
                     print(f"{Colors.RED}[!] Invalid selection{Colors.ENDC}")
                     return
+        elif search_choice == '3':
+            print(f"{Colors.YELLOW}[*] Fetching all programs...{Colors.ENDC}")
+            programs = h1_client.list_programs()
+            print(f"\n{Colors.GREEN}[✓] Found {len(programs)} programs:{Colors.ENDC}\n")
+            for idx, prog in enumerate(programs[:20], 1):
+                attrs = prog.get("attributes", {})
+                handle = attrs.get("handle", "N/A")
+                name = attrs.get("name", "N/A")
+                bounty = "💰" if attrs.get("offers_bounties", False) else "🏆"
+                print(f"  {idx}. {bounty} {Colors.GREEN}{handle}{Colors.ENDC} - {name}")
+            if len(programs) > 20:
+                print(f"{Colors.YELLOW}... and {len(programs) - 20} more.{Colors.ENDC}")
+            return
         else:
             program_handle = input(f"{Colors.CYAN}Program handle (e.g., 'security'): {Colors.ENDC}").strip()
 
@@ -814,7 +828,7 @@ def main_interactive_loop(suite: DeepSeekSecuritySuite):
                 print_main_menu()
                 continue
 
-            elif choice == '0':
+            elif choice == 'h1':
                 handle_hackerone_fetch(suite)
                 continue
 

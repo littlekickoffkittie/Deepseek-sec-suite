@@ -18,6 +18,22 @@ class Colors:
     ENDC = '\033[0m'
     BOLD = '\033[1m'
 
+class HackerOneError(Exception):
+    """Base exception for HackerOne API client errors."""
+    pass
+
+class HackerOneAPIError(HackerOneError):
+    """Raised for API errors (e.g., 4xx, 5xx response)."""
+    pass
+
+class HackerOneAuthenticationError(HackerOneAPIError):
+    """Raised for authentication failures (401)."""
+    pass
+
+class HackerOneRequestError(HackerOneError):
+    """Raised for network or request-related errors."""
+    pass
+
 class HackerOneAPI:
     """
     Client for interacting with the HackerOne API
@@ -59,15 +75,15 @@ class HackerOneAPI:
 
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
-                raise Exception(f"Authentication failed. Check your HackerOne credentials.")
+                raise HackerOneAuthenticationError("Authentication failed. Check your HackerOne credentials.")
             elif e.response.status_code == 404:
-                raise Exception(f"Resource not found: {endpoint}")
+                raise HackerOneAPIError(f"Resource not found: {endpoint}")
             else:
-                raise Exception(f"API Error ({e.response.status_code}): {e.response.text}")
+                raise HackerOneAPIError(f"API Error ({e.response.status_code}): {e.response.text}")
         except requests.exceptions.Timeout:
-            raise Exception(f"Request timed out after {self.timeout}s")
+            raise HackerOneRequestError(f"Request timed out after {self.timeout}s")
         except requests.exceptions.RequestException as e:
-            raise Exception(f"Request failed: {str(e)}")
+            raise HackerOneRequestError(f"Request failed: {str(e)}")
 
     def list_programs(self, page_size: int = 100) -> List[Dict]:
         """
@@ -355,7 +371,7 @@ def main():
                 try:
                     program = client.get_program(handle)
                     print(client.format_program_details(program))
-                except Exception as e:
+                except HackerOneError as e:
                     print(f"{Colors.RED}[!] Error: {e}{Colors.ENDC}")
 
             elif choice == '4':
@@ -376,13 +392,13 @@ def main():
                     print(f"{Colors.YELLOW}[i] You can now use this file with your AI analysis tools{Colors.ENDC}\n")
                     print(analysis_text)
 
-                except Exception as e:
+                except HackerOneError as e:
                     print(f"{Colors.RED}[!] Error: {e}{Colors.ENDC}")
 
             else:
                 print(f"{Colors.YELLOW}Unknown option: {choice}{Colors.ENDC}")
 
-    except Exception as e:
+    except HackerOneError as e:
         print(f"{Colors.RED}[!] Error: {e}{Colors.ENDC}")
 
 
